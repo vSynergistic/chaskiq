@@ -36,6 +36,14 @@ class AppPackagesCatalog
     collection = [
 
       {
+        name: "TestApp",
+        description: "SampleTestApp",
+        capability_list: %w[inbox conversations],
+        state: "enabled",
+        definitions: []
+      },
+
+      {
         name: "InboxSections",
         description: "Inbox base blocks for conversation sidebar",
         capability_list: ["inbox"],

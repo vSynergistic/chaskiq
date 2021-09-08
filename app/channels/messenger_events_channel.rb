@@ -65,16 +65,17 @@ class MessengerEventsChannel < ApplicationCable::Channel
   end
 
   # from iframes
-  def app_package_submit(data)
+  def app_package_submit(data)    
     @conversation = app.conversations.find_by(key: data["conversation_key"])
     message = @conversation.messages.find_by(key: data["message_key"])
 
     app_package = app.app_package_integrations
                      .joins(:app_package)
                      .find_by(
-                       "app_packages.name": data["data"]["type"].capitalize
+                       "app_packages.name": data["data"]["type"].classify
                      )
 
+    
     response = app_package&.call_hook(
       kind: "submit",
       ctx: {
