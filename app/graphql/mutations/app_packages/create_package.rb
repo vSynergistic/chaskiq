@@ -13,6 +13,7 @@ module Mutations
         app = find_app(app_key)
 
         app_package = current_user.app_packages.new(params.permit!)
+        app_package.app_id = app.id
 
         authorize! app_package, to: :can_manage_app_packages?, with: AppPolicy, context: {
           app: app

@@ -71,7 +71,6 @@ function Integrations({ app, dispatch }) {
   const [integrations, setIntegrations] = useState([]);
   const [tabValue, setTabValue] = useState(0);
   const [openDeleteDialog, setOpenDeleteDialog] = useState(null);
-  const [openIntegrationDialog, _setOpenIntegrationDialog] = useState(null);
   const [baseErrors, setBaseErrors] = useState(null);
   const [errors, setErrors] = useState(null);
 

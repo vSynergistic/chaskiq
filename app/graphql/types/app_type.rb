@@ -170,7 +170,8 @@ module Types
       app_packages = AppPackage.union_scope(
         AppPackage.enabled.where(agent_id: nil),
         AppPackage.published.enabled,
-        AppPackage.enabled.where(agent_id: current_user.id)
+        AppPackage.enabled.where(agent_id: current_user.id),
+        AppPackage.enabled.where(app_id: object.id)
       )
 
       app_packages = app_packages.where.not("id in(?)", integrations) if integrations.any?

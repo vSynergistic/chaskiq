@@ -5,7 +5,7 @@ class AppPackage < ApplicationRecord
   has_many :app_package_integrations, dependent: :destroy
   has_many :apps, through: :app_package_integrations
   belongs_to :author, class_name: "Agent", optional: true, foreign_key: :agent_id
-
+  belongs_to :app, optional: true
   acts_as_taggable_on :tags, :capabilities
 
   store :settings, accessors: %i[
@@ -39,6 +39,12 @@ class AppPackage < ApplicationRecord
   # Ex:- scope :active, -> {where(:active => true)}
 
   before_save :set_default_definitions
+  # before_create :parametrize_name
+
+  def parametrize_name
+    return if name.blank?
+    self.name.capitalize
+  end
 
   def is_external?
     return true if author.present?
