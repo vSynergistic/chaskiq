@@ -43,7 +43,8 @@ class AppPackage < ApplicationRecord
 
   def parametrize_name
     return if name.blank?
-    self.name.capitalize
+
+    name.capitalize
   end
 
   def is_external?
