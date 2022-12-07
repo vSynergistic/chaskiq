@@ -79,7 +79,11 @@ module MessageApis::MessageBird
       response_data["messages"].first["id"]
     end
 
-    def send_message(conversation, message)
+    def send_message(conversation, part)
+      return if part.private_note?
+
+      message = part.message.as_json
+
       blocks = JSON.parse(
         message["serialized_content"]
       )["blocks"]
@@ -117,7 +121,7 @@ module MessageApis::MessageBird
         message_params.merge!({
                                 type: "image",
                                 image: {
-                                  link: ENV["HOST"] + image_block["data"]["url"],
+                                  link: Chaskiq::Config.get("HOST") + image_block["data"]["url"],
                                   caption: plain_message
                                 }
                               })
@@ -127,7 +131,7 @@ module MessageApis::MessageBird
         message_params.merge!({
                                 type: "video",
                                 video: {
-                                  url: ENV["HOST"] + video_block["data"]["url"],
+                                  url: Chaskiq::Config.get("HOST") + video_block["data"]["url"],
                                   caption: plain_message
                                 }
                               })
@@ -137,7 +141,7 @@ module MessageApis::MessageBird
         message_params.merge!({
                                 type: "document",
                                 file: {
-                                  url: ENV["HOST"] + file_block["data"]["url"],
+                                  url: Chaskiq::Config.get("HOST") + file_block["data"]["url"],
                                   caption: plain_message
                                 }
                               })

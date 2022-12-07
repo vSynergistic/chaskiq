@@ -30,7 +30,7 @@ module MessageApis::Vonage
         "Accept" => "application/json"
       }
 
-      @conn.basic_auth(@api_key, @api_token)
+      @conn.request(:basic_auth, @api_key, @api_token)
 
       self
     end
@@ -56,7 +56,10 @@ module MessageApis::Vonage
       response_data["message_uuid"]
     end
 
-    def send_message(conversation, message)
+    def send_message(conversation, part)
+      return if part.private_note?
+
+      message = part.message.as_json
       blocks = JSON.parse(
         message["serialized_content"]
       )["blocks"]
@@ -126,7 +129,7 @@ module MessageApis::Vonage
           content: {
             type: block_type,
             "#{block_type}": {
-              url: ENV["HOST"] + block["data"]["url"],
+              url: Chaskiq::Config.get("HOST") + block["data"]["url"],
               caption: plain_message
             }
           }

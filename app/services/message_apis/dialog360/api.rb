@@ -27,7 +27,7 @@ module MessageApis::Dialog360
       )
 
       @conn.headers = {
-        'D360-Api-Key': @api_key,
+        "D360-Api-Key": @api_key,
         "Content-Type" => "application/json",
         "Accept" => "application/json"
       }
@@ -109,8 +109,10 @@ module MessageApis::Dialog360
       response_data["messages"].first["id"]
     end
 
-    def send_message(conversation, message)
-      # TODO: implement event format
+    def send_message(conversation, part)
+      return if part.private_note?
+
+      message = part.message.as_json
 
       return nil if message["serialized_content"].blank?
 
@@ -142,7 +144,7 @@ module MessageApis::Dialog360
         message_params.merge!({
                                 type: "image",
                                 image: {
-                                  link: ENV["HOST"] + image_block["data"]["url"],
+                                  link: Chaskiq::Config.get("HOST") + image_block["data"]["url"],
                                   caption: plain_message
                                 }
                               })
@@ -150,7 +152,7 @@ module MessageApis::Dialog360
         message_params.merge!({
                                 type: "video",
                                 video: {
-                                  url: ENV["HOST"] + video_block["data"]["url"],
+                                  url: Chaskiq::Config.get("HOST") + video_block["data"]["url"],
                                   caption: plain_message
                                 }
                               })
@@ -159,7 +161,7 @@ module MessageApis::Dialog360
         message_params.merge!({
                                 type: "document",
                                 document: {
-                                  link: ENV["HOST"] + file_block["data"]["url"],
+                                  link: Chaskiq::Config.get("HOST") + file_block["data"]["url"],
                                   caption: plain_message
                                 }
                               })
@@ -184,7 +186,7 @@ module MessageApis::Dialog360
     end
 
     def send_template_message(template:, conversation_key:, parameters:)
-      parameters = parameters.is_a?(Array) ? parameters : [parameters]
+      parameters = [parameters] unless parameters.is_a?(Array)
 
       conversation = @package.app.conversations.find_by(key: conversation_key)
 
@@ -195,10 +197,10 @@ module MessageApis::Dialog360
 
       data = {
         to: profile_id,
-        type: "hsm",
-        hsm: {
+        type: "template",
+        template: {
           namespace: template["namespace"],
-          element_name: template["name"],
+          name: template["name"],
           language: {
             policy: "deterministic",
             code: template["language"]
@@ -216,7 +218,30 @@ module MessageApis::Dialog360
         "#{@url}/messages",
         data.to_json
       )
-      JSON.parse(s.body)
+
+      # puts "TEMPLATE ******* "
+      # puts template
+      json = JSON.parse(s.body)
+
+      if s.success?
+        json_message = json["messages"].first
+        return if json_message.blank?
+
+        message_id = json_message["id"]
+
+        conversation.add_message(
+          from: @package.app.agents.first,
+          message: {
+            html_content: "WHATSAPP TEMPLATE SENT: #{template['name']}"
+            # serialized_content: serialized_content
+          },
+          provider: PROVIDER,
+          message_source_id: message_id,
+          check_assignment_rules: false
+        )
+
+      end
+      json
     end
 
     # not used fro now

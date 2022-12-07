@@ -62,7 +62,10 @@ module MessageApis::Telegram
       response_data.dig("result", "message_id")
     end
 
-    def send_message(conversation, message)
+    def send_message(conversation, part)
+      return if part.private_note?
+
+      message = part.message.as_json
       # TODO: implement event format
 
       return nil if message["serialized_content"].blank?
@@ -93,21 +96,21 @@ module MessageApis::Telegram
 
       # TODO: support audio / video / gif
       if image_block
-        file_url = "#{ENV['HOST']}#{image_block['data']['url']}"
+        file_url = "#{Chaskiq::Config.get('HOST')}#{image_block['data']['url']}"
         upload_telegram(
           channel_id,
           { photo: file_url },
           method: "sendPhoto"
         )
       elsif video_block
-        file_url = "#{ENV['HOST']}#{video_block['data']['url']}"
+        file_url = "#{Chaskiq::Config.get('HOST')}#{video_block['data']['url']}"
         upload_telegram(
           channel_id,
           { video: file_url },
           method: "sendVideo"
         )
       elsif file_block
-        file_url = "#{ENV['HOST']}#{file_block['data']['url']}"
+        file_url = "#{Chaskiq::Config.get('HOST')}#{file_block['data']['url']}"
         upload_telegram(
           channel_id,
           { document: file_url },
