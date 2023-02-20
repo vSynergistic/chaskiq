@@ -37,15 +37,15 @@ module MessageApis::Dialog360
 
     def register_webhook(app_package, integration)
       data = {
-        url: integration.hook_url
+        url: integration.hook_url # .gsub("http://localhost:3000", "https://chaskiq.sa.ngrok.io")
       }
 
       response = @conn.post("#{@url}/configs/webhook", data.to_json)
       response.status
     end
 
-    def retrieve_templates
-      response = @conn.get("#{@url}/configs/templates?limit=10")
+    def retrieve_templates(offset:)
+      response = @conn.get("#{@url}/configs/templates?limit=10&offset=#{offset}")
       response.body
     end
 
@@ -95,8 +95,13 @@ module MessageApis::Dialog360
       # crea el mensaje con el channel de una, asi cuando se cree
       # el notify_message va a bypasear el canal
       # conversation.add_message()
+
+      errors = params["errors"]
+      msg = ""
+      msg = errors.map { |o| "#{o['code']} #{o['title']}" }.join if errors.is_a?(Array)
+
       conversation.add_message_event(
-        action: "errored",
+        action: "errored: #{msg}",
         provider: PROVIDER,
         message_source_id: "bypass-internal-#{params['id']}",
         data: {
@@ -123,13 +128,14 @@ module MessageApis::Dialog360
       # TODO: support more blocks
       image_block = blocks.find { |o| o["type"] == "image" }
       video_block = blocks.find { |o| o["type"] == "recorded-video" }
+      audio_block = blocks.find { |o| o["type"] == "recorded-audio" }
       file_block = blocks.find { |o| o["type"] == "file" }
       is_plain = !image_block || !video_block || !file_block
       plain_message = blocks.map do |o|
         o["text"]
       end.join("\r\n")
 
-      profile_id = get_profile_for_participant(conversation)
+      profile_id = get_profile_for_participant(conversation.main_participant)
 
       # TODO: maybe handle an error here ?
       return if profile_id.blank?
@@ -139,12 +145,14 @@ module MessageApis::Dialog360
         to: profile_id
       }
 
+      endpoint = Chaskiq::Config.get("HOST") # "https://chaskiq.sa.ngrok.io"
+
       # TODO: support audio / video / gif
       if image_block
         message_params.merge!({
                                 type: "image",
                                 image: {
-                                  link: Chaskiq::Config.get("HOST") + image_block["data"]["url"],
+                                  link: endpoint + image_block["data"]["url"],
                                   caption: plain_message
                                 }
                               })
@@ -152,8 +160,16 @@ module MessageApis::Dialog360
         message_params.merge!({
                                 type: "video",
                                 video: {
-                                  url: Chaskiq::Config.get("HOST") + video_block["data"]["url"],
+                                  link: endpoint + video_block["data"]["url"],
                                   caption: plain_message
+                                }
+                              })
+
+      elsif audio_block
+        message_params.merge!({
+                                type: "audio",
+                                audio: {
+                                  link: endpoint + audio_block["data"]["url"]
                                 }
                               })
 
@@ -161,7 +177,7 @@ module MessageApis::Dialog360
         message_params.merge!({
                                 type: "document",
                                 document: {
-                                  link: Chaskiq::Config.get("HOST") + file_block["data"]["url"],
+                                  link: endpoint + file_block["data"]["url"],
                                   caption: plain_message
                                 }
                               })
@@ -172,28 +188,125 @@ module MessageApis::Dialog360
                               })
       end
 
-      @conn.post(
+      r = @conn.post(
         "#{@url}/messages",
         message_params.to_json
       )
+
+      Rails.logger.debug "---###########---"
+
+      Rails.logger.info r.body
+
+      Rails.logger.debug "---###########---"
+
+      r
     end
 
-    def get_profile_for_participant(conversation)
-      conversation.main_participant
+    def upload_media(media)
+      # conn = @conn do |f|
+      #  f.request :multipart
+      #  f.request :url_encoded
+      #  f.adapter :net_http # This is what ended up making it work
+      # end
+
+      # payload = { :file => Faraday::UploadIO.new('...', 'image/jpeg') }
+
+      # conn.post('/', payload)
+    end
+
+    def get_profile_for_participant(participant)
+      participant
         &.external_profiles
         &.find_by(provider: PROVIDER)
         &.profile_id
     end
 
-    def send_template_message(template:, conversation_key:, parameters:)
+    def get_profile_for_participant_label(participant)
+      if (l = get_profile_for_participant(participant)) && l.present?
+        "Dialog360 profile: #{l}"
+      end
+    end
+
+    def prepare_initiator_channel_for(conversation, package)
+      Rails.logger.debug conversation.inspect
+      @package = package
+
+      profile_id = conversation.main_participant
+                                &.external_profiles
+                                &.find_by(provider: PROVIDER)
+                                &.profile_id
+
+      profile_id = add_participant_to_existing_user(conversation.main_participant, conversation.main_participant.phone) if profile_id.blank?
+
+      raise ActiveRecord::Rollback if profile_id.blank?
+
+      conversation = find_conversation_by_channel(PROVIDER, profile_id) || conversation
+      # clear_conversation(previous_conversation) if previous_conversation.present?
+
+      conversation.update(
+        conversation_channels_attributes: [
+          provider: PROVIDER,
+          provider_channel_id: profile_id
+        ]
+      )
+    end
+
+    def add_participant_to_existing_user(app_user, phone)
+      dialog_user = phone.to_s
+
+      app = @package.app
+
+      external_profile = app.external_profiles.find_by(
+        provider: PROVIDER,
+        profile_id: dialog_user
+      )
+
+      # creates the profile
+      if external_profile.blank?
+        app_user.external_profiles.create(
+          provider: PROVIDER,
+          profile_id: dialog_user
+        )
+        app_user.update(phone: dialog_user)
+      end
+      dialog_user
+
+      # participant = external_profile&.app_user
+      # means the external profile belongs to somebody else
+      # return nil if participant && participant.id != app_user.id
+      # dialog_user if participant && participant.id == app_user.id
+    end
+
+    def send_template_message(template:, conversation_key:, parameters:, selected_user:)
       parameters = [parameters] unless parameters.is_a?(Array)
 
       conversation = @package.app.conversations.find_by(key: conversation_key)
+      profile_id = nil
 
-      profile_id = get_profile_for_participant(conversation)
+      if conversation.blank? && conversation_key.blank? && selected_user.present?
+        participant = @package.app.app_users.find(selected_user)
+
+        profile_id = get_profile_for_participant(participant)
+
+        conversation = find_conversation_by_channel(PROVIDER, profile_id) if profile_id.present?
+
+        options = {
+          # from: author,
+          participant: participant,
+          initiator_channel: PROVIDER
+        }
+
+        conversation = @package.app.start_conversation(options) if conversation.blank?
+      end
+
+      profile_id = get_profile_for_participant(conversation.main_participant) if profile_id.blank?
+
+      profile_id = add_participant_to_existing_user(conversation.main_participant, conversation.main_participant.phone) if profile_id.blank?
 
       Rails.logger.debug template
       return if profile_id.blank?
+
+      paramters_list = parameters.compact
 
       data = {
         to: profile_id,
@@ -205,9 +318,10 @@ module MessageApis::Dialog360
             policy: "deterministic",
             code: template["language"]
           },
-          localizable_params: parameters.compact.map do |o|
-            { default: o }
-          end
+          components: [{
+            type: "body",
+            parameters: paramters_list.map { |o| { type: "text", text: o } }
+          }]
         }
       }
 
@@ -221,6 +335,7 @@ module MessageApis::Dialog360
 
       # puts "TEMPLATE ******* "
       # puts template
+
       json = JSON.parse(s.body)
 
       if s.success?
@@ -241,7 +356,7 @@ module MessageApis::Dialog360
         )
 
       end
-      json
+      json.merge({ "conversation_key" => conversation.key })
     end
 
     # not used fro now
@@ -294,7 +409,7 @@ module MessageApis::Dialog360
         channel_id = sender_id
         dialog_user = sender_id
 
-        conversation = find_conversation_by_channel(channel_id)
+        conversation = find_conversation_by_channel(PROVIDER, channel_id)
 
         next if conversation && conversation.conversation_part_channel_sources
                                             .find_by(message_source_id: message_id).present?
@@ -327,18 +442,6 @@ module MessageApis::Dialog360
           check_assignment_rules: true
         )
       end
-    end
-
-    def find_conversation_by_channel(channel)
-      conversation = @package
-                     .app
-                     .conversations
-                     .joins(:conversation_channels)
-                     .where(
-                       "conversation_channels.provider =? AND
-                          conversation_channels.provider_channel_id =?",
-                       PROVIDER, channel
-                     ).first
     end
 
     def serialize_content(data)
@@ -413,6 +516,7 @@ module MessageApis::Dialog360
             provider: PROVIDER,
             profile_id: dialog_user
           )
+          participant.update(phone: dialog_user)
         end
 
         participant
